@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+
+      - uses: browser-actions/setup-chrome@v1
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Format check
+        run: dart format --set-exit-if-changed .
+
+      - name: Analyze
+        run: dart analyze
+
+      - name: Unit tests (VM + Chrome)
+        run: dart test -p vm,chrome
+
+      - name: API docs
+        run: dart doc --validate-links
+
+      - name: Regenerate parser artifacts
+        run: ./tool/generate_parser.sh
+
+      - name: Verify generated sync
+        run: git diff --exit-code

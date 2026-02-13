@@ -1,0 +1,24 @@
+name: cypher_dart
+description: OpenCypher parser, AST, diagnostics, and formatter for Dart and Flutter.
+version: 0.1.0
+repository: https://github.com/jaichang/cypher_dart
+homepage: https://github.com/jaichang/cypher_dart
+issue_tracker: https://github.com/jaichang/cypher_dart/issues
+topics:
+  - cypher
+  - neo4j
+  - graph-database
+  - parser
+  - flutter
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+
+dependencies:
+  collection: ^1.19.1
+  meta: ^1.16.0
+  source_span: ^1.10.1
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.26.3

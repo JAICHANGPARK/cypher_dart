@@ -1,0 +1,4 @@
+doc/
+.github/
+example/flutter_cypher_lab/.dart_tool/
+example/flutter_cypher_lab/build/
