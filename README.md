@@ -1,21 +1,23 @@
 # cypher_dart
 
-`cypher_dart` is a Pure Dart package for parsing and formatting Cypher queries.
-It is designed for apps that need query validation, editor feedback, and canonical formatting in Dart or Flutter.
+[한국어 README](README.ko.md)
 
-## What you can do
+`cypher_dart` is a pure Dart package for parsing and formatting Cypher queries.
+It is designed for tools that need query validation, editor feedback, and normalized query output in Dart or Flutter.
 
-- Parse Cypher query text into a typed AST.
-- Collect diagnostics with source spans (`line`, `column`, offsets).
-- Run in strict mode (default) or enable Neo4j-specific features explicitly.
-- Format parsed queries into normalized, consistent output.
-- Use the same API on VM and Flutter Web/Desktop/Mobile.
+## Why use it
 
-## Current scope (`0.1.0`)
+- Parse Cypher text into a typed AST.
+- Get diagnostics with source locations (`line`, `column`, offsets).
+- Use strict OpenCypher by default, or enable Neo4j-specific features explicitly.
+- Format parsed queries into stable, canonical output.
+- Run the same API on VM and Flutter (mobile/web/desktop).
+
+## Scope (version `0.1.0`)
 
 - Clause-level OpenCypher parsing for common query flows.
-- Partial semantic validation (ordering rules, duplicate aliases, feature gating).
-- No query execution engine (this package does not run queries against Neo4j DB).
+- Partial semantic validation (clause ordering, duplicate aliases, feature gating).
+- No query execution engine (this package does not run queries against a database).
 
 ## Install
 
@@ -23,13 +25,19 @@ It is designed for apps that need query validation, editor feedback, and canonic
 dart pub add cypher_dart
 ```
 
-## Recommended import
+## Import
+
+Recommended entrypoint:
 
 ```dart
 import 'package:cypher_dart/cypher_dart.dart';
 ```
 
-You can also import `package:cypher_dart/opencypher.dart`, but `cypher_dart.dart` is the default entrypoint.
+Equivalent lower-level entrypoint:
+
+```dart
+import 'package:cypher_dart/opencypher.dart';
+```
 
 ## Quick start
 
@@ -60,11 +68,11 @@ LIMIT 5
 }
 ```
 
-## Real usage patterns
+## Common usage patterns
 
 ### 1) Fail-fast validation (API/server)
 
-Use default settings (`recoverErrors: false`) when invalid queries should be rejected immediately.
+Use default options (`recoverErrors: false`) when invalid queries must be rejected.
 
 ```dart
 final result = Cypher.parse(userQuery);
@@ -73,9 +81,9 @@ if (result.hasErrors) {
 }
 ```
 
-### 2) Recovery mode (editor/IDE input)
+### 2) Recovery mode (editor/IDE)
 
-Use `recoverErrors: true` when users are typing incomplete queries and you still want partial AST/feedback.
+Use `recoverErrors: true` while users are typing incomplete queries.
 
 ```dart
 final result = Cypher.parse(
@@ -83,13 +91,12 @@ final result = Cypher.parse(
   options: const CypherParseOptions(recoverErrors: true),
 );
 
-// You can still inspect result.document even with diagnostics.
+// You can still inspect result.document with diagnostics.
 ```
 
 ### 3) Strict mode vs Neo4j extensions
 
-Strict OpenCypher is default.
-If your app allows Neo4j-specific syntax, enable features explicitly.
+Strict OpenCypher is default. Enable extensions explicitly when needed.
 
 ```dart
 final strictResult = Cypher.parse('USE neo4j MATCH (n) RETURN n');
@@ -108,7 +115,7 @@ final relaxedResult = Cypher.parse(
 
 ### 4) Neo4j dialect mode
 
-If your application is Neo4j-first, set dialect to `neo4j5`.
+If your app is Neo4j-first, use `CypherDialect.neo4j5`.
 
 ```dart
 final result = Cypher.parse(
@@ -127,7 +134,7 @@ if (!result.hasErrors && result.document != null) {
 }
 ```
 
-### 6) AST to JSON (for logs/testing)
+### 6) AST to JSON (logging/testing)
 
 ```dart
 final result = Cypher.parse('MATCH (n) RETURN n');
@@ -141,37 +148,68 @@ if (result.document != null) {
 
 - `dialect`: `CypherDialect.openCypher9` (default) or `CypherDialect.neo4j5`
 - `enabledFeatures`: explicit Neo4j extension allow-list
-- `recoverErrors`: `false` (fail-fast) or `true` (best-effort parse + diagnostics)
+- `recoverErrors`: `false` (fail-fast) or `true` (best-effort parse)
 
-## Diagnostic codes
+## Glossary
+
+- `AST` (Abstract Syntax Tree): A tree representation of a query, split into structured nodes instead of raw text.
+- `Cypher`: A query language for graph databases.
+- `OpenCypher`: A vendor-neutral Cypher specification.
+- `Neo4j`: A graph database that extends OpenCypher with additional syntax and features.
+- `Dialect`: Parser behavior preset (for example, strict OpenCypher vs Neo4j mode).
+- `Feature gate`: A switch that explicitly allows/disallows specific syntax features.
+- `Parse`: The process of converting query text into a structured model (AST).
+- `Parser`: The component that performs parsing and produces diagnostics.
+- `Clause`: A major query unit such as `MATCH`, `WHERE`, `RETURN`, `ORDER BY`.
+- `Diagnostic`: A parser/validator message with code, severity, and source location.
+- `Span`: The source range (`start` and `end`) tied to a node or diagnostic.
+- `Offset`: Character index in the original query text.
+- `Fail-fast`: Stop on errors and return no usable document (`recoverErrors: false`).
+- `Recovery mode`: Continue parsing after errors to keep partial structure (`recoverErrors: true`).
+- `Canonical formatting`: Converting equivalent queries into a consistent output style.
+
+## Supported clause node types
+
+- `MatchClause` (`OPTIONAL MATCH` included)
+- `WhereClause`
+- `WithClause`
+- `ReturnClause`
+- `OrderByClause`
+- `LimitClause`
+- `SkipClause`
+- `CreateClause`
+- `MergeClause`
+- `SetClause`
+- `RemoveClause`
+- `DeleteClause`
+
+## Diagnostic code ranges
 
 - `CYP1xx`: syntax/parser errors
 - `CYP2xx`: extension/feature-gate violations
 - `CYP3xx`: semantic validation errors
 - `CYP9xx`: internal parser failures
 
-## Flutter usage
+## Flutter integration notes
 
-The package itself is Pure Dart and does not use `dart:io` in `lib/`.
+The library is pure Dart and does not depend on `dart:io` in `lib/`.
 
-Practical integration flow in Flutter:
+Typical Flutter flow:
 
-1. Bind query text to `TextEditingController`.
-2. Call `Cypher.parse` on change (usually with debounce + `recoverErrors: true`).
-3. Show `result.diagnostics` in UI.
-4. If valid, show `CypherPrinter.format(result.document!)` preview.
+1. Bind query input to `TextEditingController`.
+2. Parse on text changes (usually with debounce + `recoverErrors: true`).
+3. Render `result.diagnostics` in UI.
+4. Render `CypherPrinter.format(result.document!)` when parse succeeds.
 
-A working sample exists at:
-
-- `/Users/jaichang/Documents/GitHub/cypher_dart/example/flutter_cypher_lab/lib/main.dart`
+Sample app: `example/flutter_cypher_lab/lib/main.dart`
 
 ## Examples and tests
 
-- CLI example: `/Users/jaichang/Documents/GitHub/cypher_dart/example/main.dart`
-- Parser tests: `/Users/jaichang/Documents/GitHub/cypher_dart/test/parser`
-- Diagnostic tests: `/Users/jaichang/Documents/GitHub/cypher_dart/test/diagnostics`
-- Feature-gate tests: `/Users/jaichang/Documents/GitHub/cypher_dart/test/extensions`
-- Browser compatibility test: `/Users/jaichang/Documents/GitHub/cypher_dart/test/web/web_platform_test.dart`
+- CLI example: `example/main.dart`
+- Parser tests: `test/parser`
+- Diagnostics tests: `test/diagnostics`
+- Feature-gate tests: `test/extensions`
+- Browser compatibility test: `test/web/web_platform_test.dart`
 
 ## Local development
 
@@ -179,13 +217,9 @@ A working sample exists at:
 ./tool/release_check.sh
 ```
 
-This runs format, analyze, tests, docs, parser generation, and generated file sync checks.
+This runs format, analyze, tests, browser tests (if Chrome exists), docs validation, parser generation, and generated-file sync checks.
 
-If you want ANTLR generation mode, place the runtime jar in:
-
-- `/Users/jaichang/Documents/GitHub/cypher_dart/tool/antlr/antlr-4.13.2-complete.jar`
-
-Details: `/Users/jaichang/Documents/GitHub/cypher_dart/tool/antlr/README.md`
+ANTLR setup details: `tool/antlr/README.md`
 
 ## License
 
