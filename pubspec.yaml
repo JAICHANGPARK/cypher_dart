@@ -1,6 +1,6 @@
 name: cypher_dart
 description: OpenCypher parser, AST, diagnostics, and formatter for Dart and Flutter.
-version: 0.1.0
+version: 0.1.1
 repository: https://github.com/jaichang/cypher_dart
 homepage: https://github.com/jaichang/cypher_dart
 issue_tracker: https://github.com/jaichang/cypher_dart/issues
