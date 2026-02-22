@@ -41,10 +41,10 @@ import 'package:cypher_dart/opencypher.dart';
 
 ## Documentation
 
-- [DevRel docs index](docs/devrel/README.md)
-- [Getting started](docs/devrel/getting-started.md)
-- [Execution engine](docs/devrel/execution-engine.md)
-- [Benchmarking](docs/devrel/benchmarking.md)
+- [DevRel docs index](docs/README.md)
+- [Getting started](docs/getting-started.md)
+- [Execution engine](docs/execution-engine.md)
+- [Benchmarking](docs/benchmarking.md)
 - [Technical report (LaTeX)](docs/paper/technical_report.tex)
 - [Technical report build guide](docs/paper/README.md)
 

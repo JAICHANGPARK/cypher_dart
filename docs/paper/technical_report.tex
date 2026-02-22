@@ -3,6 +3,7 @@
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
 \usepackage{microtype}
+\usepackage{amsmath}
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage{longtable}
@@ -12,7 +13,7 @@
 \hfuzz=3pt
 
 \title{cypher\_dart Technical Report}
-\author{cypher\_dart contributors}
+\author{Jaichang Park\\Google Developer Expert (GDE)\thanks{Dart-Flutter}}
 \date{\today}
 
 \begin{document}
@@ -54,6 +55,53 @@ artifacts in \texttt{lib/src/generated}; however, the active parse pipeline
 described below is a lightweight clause lexer plus AST builder. The ANTLR path
 is currently auxiliary infrastructure and not the default execution path
 \cite{antlr4Reference,cypherDartRepo}.
+
+\section{Related Work}
+We reviewed fifteen arXiv papers for language semantics, path-query semantics,
+property-graph integrity, and system execution. We also cross-checked
+implementation context using current web sources for standardization, query
+manuals, and benchmark tooling.
+
+\subsection{Cypher, language semantics, and expressiveness}
+Formal foundations for Cypher were established by a denotational account of
+query semantics and value domains \cite{francis2018cypherSemantics}. Recent work
+extends this direction toward proof-oriented equivalence checking for Cypher
+queries \cite{tang2025cypherEquivalence}. Expressiveness boundaries for
+property-graph querying over relational backends are studied in
+\cite{rotschield2025expressivenessPgSql}, which is directly relevant when
+building portability layers between graph-native and relational runtimes.
+
+\subsection{Path semantics and recursive query execution}
+Regular path query (RPQ) semantics continue to evolve, including run-based
+semantics \cite{david2022runBasedRpq} and comparative analysis of RPQ semantics
+\cite{marsault2026rpqSemantics}. Property constraints over paths are formalized
+in \cite{orejas2025pathProperties}, while executable evaluation systems such as
+PathDB focus on operational treatment of regular path queries
+\cite{garcia2025pathDb}. On the engine side, recursive execution and compilation
+are addressed through cross-paradigm recursive query compilation
+\cite{shaikhha2025raqlet} and robust recursive parallelism in graph DBMSs
+\cite{chakraborty2025recursiveParallelism}. Fast dual simulation remains a
+reference point for pattern-query execution tradeoffs \cite{mennicke2018dualSimulation}.
+
+\subsection{Property-graph constraints, schema, and transformations}
+Property-graph data quality and maintainability are covered by schema validation
+and schema evolution \cite{bonifati2019schemaEvolution}, trigger mechanisms for
+property-graph updates \cite{ceri2023pgTriggers}, graph transformation
+frameworks \cite{bonifati2024transformingPg}, and explicit repair under
+property-graph constraints \cite{spinrath2026pgRepair}. Together, these works
+frame the design space for moving from parser-level correctness toward
+state-consistent execution.
+
+\subsection{System and ecosystem references from web sources}
+A recent survey of graph databases provides high-level system taxonomy and
+capability framing \cite{coimbra2025surveyGraphDatabases}. For practical
+language behavior and user-facing semantics, the current Neo4j Cypher manual is
+an implementation reference \cite{neo4jCypherManual2026}. The broader ecosystem
+includes Apache AGE as another open property-graph implementation target
+\cite{apacheAgeDocs2026}. Standardization context is commonly summarized around
+ISO/IEC 39075 GQL \cite{isoGqlWikipedia2026}. For benchmark-style workload
+thinking, LDBC SNB data-generation assets remain a useful operational reference
+\cite{ldbcSnbRepo2026}.
 
 \section{System Architecture}
 \subsection{Parser and Diagnostics Pipeline}
@@ -109,6 +157,26 @@ Execution is row-pipeline based:
 
 The runtime uses an \texttt{InMemoryGraphStore} with immutable node,
 relationship, and path value objects returned to the caller.
+
+\begin{figure}[t]
+\centering
+\fbox{
+\begin{minipage}{0.95\linewidth}
+\centering
+\texttt{Query Text}
+$\rightarrow$
+\texttt{Cypher.parse}
+$\rightarrow$
+\texttt{CypherDocument AST + Diagnostics}
+$\rightarrow$
+\texttt{CypherEngine.execute}
+$\rightarrow$
+\texttt{records / columns / runtimeErrors}
+\end{minipage}
+}
+\caption{High-level processing pipeline in \texttt{cypher\_dart}.}
+\label{fig:engine-pipeline}
+\end{figure}
 
 \section{Language Coverage}
 Table~\ref{tab:support-matrix} summarizes implemented scope.
@@ -191,6 +259,16 @@ fallback behavior.
 The parse phase and runtime phase are explicitly separated:
 parse errors stop execution; runtime errors return with parse success metadata.
 
+\paragraph{Simple runtime cost model.}
+For a query $Q$ decomposed into $k$ clause-level operators over graph $G$,
+we use the following approximation to reason about scaling trends:
+\[
+T(Q, G) \approx \sum_{i=1}^{k}\left(\alpha_i |R_i| + \beta_i |R_i|\log(1+|R_i|)\right),
+\]
+where $R_i$ is the intermediate row set after operator $i$, and
+$\alpha_i, \beta_i$ are operator-specific constants. This is a practical model
+for performance discussion, not a strict optimizer guarantee.
+
 \section{Evaluation Plan}
 \subsection{Current Local Validation Assets}
 Repository validation already includes:
@@ -215,6 +293,66 @@ The script is intentionally launcher-dependent and should be used for relative
 regression tracking on a fixed machine profile, not for cross-machine absolute
 claims.
 
+\subsection{Coverage Snapshot (2026-02-22)}
+The current repository includes \texttt{coverage/lcov.info}. We report line
+coverage using:
+\[
+\mathrm{LineCoverage} = \frac{\mathrm{LH}}{\mathrm{LF}} \times 100.
+\]
+From the latest local snapshot: $\mathrm{LF}=2548$, $\mathrm{LH}=2328$, which
+gives \textbf{91.37\%} line coverage.
+
+\begin{table}[t]
+\centering
+\caption{Coverage snapshot from \texttt{coverage/lcov.info} (2026-02-22).}
+\label{tab:coverage-snapshot}
+\small
+\begin{tabularx}{\linewidth}{@{}lrr@{}}
+\toprule
+Scope & LH / LF & Line coverage \\
+\midrule
+Overall (\texttt{lib/src}) & 2328 / 2548 & 91.37\% \\
+\texttt{lib/src/engine/engine.dart} & 1778 / 1992 & 89.26\% \\
+\texttt{lib/src/engine/graph.dart} & 78 / 78 & 100.00\% \\
+\bottomrule
+\end{tabularx}
+\normalsize
+\end{table}
+
+\subsection{Benchmark Snapshot (2026-02-22)}
+For benchmark runs with iteration count $N$ and elapsed wall-clock time
+$t_{\mathrm{total}}$, we compute:
+\[
+\mathrm{ops/s} = \frac{N}{t_{\mathrm{total}}}, \qquad
+\mathrm{avg\_ms/op} = 1000 \cdot \frac{t_{\mathrm{total}}}{N}.
+\]
+Using:
+\begin{verbatim}
+dart run tool/benchmark_engine.dart \
+  --iterations 300 --warmup 60 --nodes 2000
+\end{verbatim}
+we obtained the following local snapshot.
+
+\begin{table}[t]
+\centering
+\caption{Local benchmark snapshot (2026-02-22).}
+\label{tab:benchmark-snapshot}
+\small
+\begin{tabularx}{\linewidth}{@{}lrr@{}}
+\toprule
+Scenario & avg\_ms/op & ops/s \\
+\midrule
+\texttt{parse\_simple} & 0.0627 & 15945.6 \\
+\texttt{parse\_complex} & 0.0453 & 22070.2 \\
+\texttt{execute\_filter\_projection} & 14.0994 & 70.9 \\
+\texttt{execute\_relationship\_match} & 11.2954 & 88.5 \\
+\texttt{execute\_aggregation} & 8.1554 & 122.6 \\
+\texttt{execute\_merge\_on\_match} & 0.0404 & 24756.6 \\
+\bottomrule
+\end{tabularx}
+\normalsize
+\end{table}
+
 \subsection{Reproducibility Checklist}
 \begin{table}[t]
 \centering
@@ -227,22 +365,22 @@ claims.
 Item & Status & How to verify \\
 \midrule
 SDK bounds and dependency lockfile tracked & Yes &
-\path{pubspec.yaml}, \path{pubspec.lock} \\
+\texttt{pubspec.yaml}, \texttt{pubspec.lock} \\
 \addlinespace
 Deterministic test entry points committed & Yes &
-Run \texttt{dart test} in \path{test/}. \\
+Run \texttt{dart test} in \texttt{test/}. \\
 \addlinespace
 TCK parse coverage harness available & Yes &
-Run \texttt{dart run} on \path{tool/tck_parse_coverage.dart}. \\
+Run \texttt{dart run} on \texttt{tool/tck\_parse\_coverage.dart}. \\
 \addlinespace
 TCK execution smoke harness available & Yes &
-Run \texttt{dart run} on \path{tool/tck_execute_coverage.dart}. \\
+Run \texttt{dart run} on \texttt{tool/tck\_execute\_coverage.dart}. \\
 \addlinespace
 Engine microbenchmark harness available & Yes &
-Run \texttt{dart run} on \path{tool/benchmark_engine.dart}. \\
+Run \texttt{dart run} on \texttt{tool/benchmark\_engine.dart}. \\
 \addlinespace
 Document build command documented & Yes &
-\path{docs/paper/README.md} \\
+\texttt{docs/paper/README.md} \\
 \addlinespace
 Machine/OS/VM metadata capture automated & No &
 Record manually when reporting benchmark results \\
