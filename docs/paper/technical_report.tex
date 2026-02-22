@@ -1,0 +1,288 @@
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{hyperref}
+\setlength{\emergencystretch}{1.5em}
+\hfuzz=3pt
+
+\title{cypher\_dart Technical Report}
+\author{cypher\_dart contributors}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report describes the currently implemented architecture and scope of
+\texttt{cypher\_dart}, a pure Dart Cypher toolkit with parser diagnostics,
+canonical formatting, and an in-memory execution engine. The implementation is
+intentionally clause-oriented and pragmatic: it provides strong tooling support
+for common OpenCypher query flows while keeping strict boundaries around
+unsupported features. We document the parser and diagnostics pipeline, language
+coverage, execution semantics, and a reproducible local evaluation plan based
+on tests, TCK smoke coverage scripts, and a built-in microbenchmark driver.
+\end{abstract}
+
+\section{Introduction}
+Cypher tooling in Dart and Flutter commonly needs four capabilities: syntactic
+validation during editing, actionable diagnostics with source locations,
+deterministic query normalization, and lightweight execution for local
+experimentation. \texttt{cypher\_dart} targets this combination in a single
+package, with strict OpenCypher behavior by default and explicit feature
+gating for selected Neo4j-oriented syntax.
+
+The current release (package version \texttt{0.1.1}) is best characterized as
+a production-ready tooling core plus an MVP execution runtime. It is not a full
+spec-complete database runtime. This report focuses on implemented behavior in
+the repository rather than projected roadmap items \cite{cypherDartRepo}.
+
+\section{Background}
+openCypher defines a vendor-neutral language reference, grammar artifacts, and
+a Technology Compatibility Kit (TCK) used by implementations to assess
+behavioral compatibility \cite{openCypher9Spec,openCypherBNF,openCypherTCK}.
+\texttt{cypher\_dart} vendors openCypher resources in-tree and uses them as the
+primary reference baseline.
+
+The package also includes an ANTLR generation utility and generated parser
+artifacts in \texttt{lib/src/generated}; however, the active parse pipeline
+described below is a lightweight clause lexer plus AST builder. The ANTLR path
+is currently auxiliary infrastructure and not the default execution path
+\cite{antlr4Reference,cypherDartRepo}.
+
+\section{System Architecture}
+\subsection{Parser and Diagnostics Pipeline}
+The parser front end is organized as:
+\begin{enumerate}
+  \item Source mapping: input text is wrapped by a \texttt{SourceMapper} to
+  produce stable spans (line, column, offset).
+  \item Extension gate pre-scan: strict mode checks for selected Neo4j syntax
+  using feature gates (\texttt{CYP201}--\texttt{CYP204}).
+  \item Clause lexing: statements are split on top-level semicolons, then
+  clause keywords are extracted at top level (quote and bracket aware).
+  \item AST building: lexed clauses map to typed clause nodes
+  (\texttt{MatchClause}, \texttt{ReturnClause}, etc.) with raw clause bodies.
+  \item Semantic validation: current checks include clause ordering constraints
+  (\texttt{CYP300}), duplicate projection aliases (\texttt{CYP301}), and
+  duplicate \texttt{RETURN} in one statement (\texttt{CYP302}).
+\end{enumerate}
+
+Parse options expose:
+\begin{itemize}
+  \item Dialect mode (\texttt{openCypher9} or \texttt{neo4j5}),
+  \item Explicit feature enablement in strict mode,
+  \item Recovery mode (\texttt{recoverErrors}) for partial documents.
+\end{itemize}
+
+In fail-fast mode, any error yields \texttt{document = null}. In recovery mode,
+partial AST output is retained when possible.
+
+\subsection{AST Representation and Formatter}
+The AST is clause-level. Each clause stores:
+\begin{itemize}
+  \item A normalized keyword,
+  \item Raw body text,
+  \item Source span.
+\end{itemize}
+
+The formatter (\texttt{CypherPrinter}) applies canonical uppercase keywords,
+stable clause ordering in output, statement separation by semicolons, and
+whitespace normalization inside clause bodies. Because clause bodies remain
+string-based, formatting is deterministic but not token-preserving.
+
+\subsection{In-Memory Execution Engine}
+\texttt{CypherEngine.execute} performs parse-then-run. If parse errors exist,
+execution is skipped and parse diagnostics are returned. Runtime failures are
+reported separately as execution errors.
+
+Execution is row-pipeline based:
+\begin{enumerate}
+  \item Seed with one empty row,
+  \item Apply clauses sequentially to transform row sets,
+  \item Project final records and columns.
+\end{enumerate}
+
+The runtime uses an \texttt{InMemoryGraphStore} with immutable node,
+relationship, and path value objects returned to the caller.
+
+\section{Language Coverage}
+Table~\ref{tab:support-matrix} summarizes implemented scope.
+
+\begin{table}[t]
+\centering
+\caption{Implementation support matrix (current repository state).}
+\label{tab:support-matrix}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.30\linewidth} >{\raggedright\arraybackslash}p{0.12\linewidth} >{\raggedright\arraybackslash}X@{}}
+\toprule
+Capability & Status & Notes \\
+\midrule
+Clause AST + formatter for core clauses:\newline
+\texttt{MATCH}, \texttt{WHERE}, \texttt{WITH}, \texttt{RETURN},\newline
+\texttt{ORDER BY}, \texttt{SKIP}, \texttt{LIMIT}, \texttt{CREATE},\newline
+\texttt{MERGE}, \texttt{SET}, \texttt{REMOVE}, \texttt{DELETE},\newline
+\texttt{DETACH DELETE}, \texttt{UNWIND}, \texttt{CALL},\newline
+\texttt{UNION}, \texttt{UNION ALL}
+& Supported & Typed clause nodes with source spans. \\
+\addlinespace
+Clause-order and alias diagnostics (\texttt{CYP300}--\texttt{CYP302})
+& Supported & Includes duplicate \texttt{RETURN} and duplicate projection aliases. \\
+\addlinespace
+Strict-mode feature gates for \texttt{EXISTS \{...\}}, \texttt{CALL \{...\} IN TRANSACTIONS},
+pattern comprehension, \texttt{USE}
+& Supported & Enforced unless enabled by feature flags or \texttt{neo4j5} dialect. \\
+\addlinespace
+Expression-level parse tree in AST
+& Not yet & Clause bodies are stored as raw strings. \\
+\addlinespace
+MATCH relationship patterns (direction, alternation, variable length)
+& Supported & Includes path binding and variable-length matching in \texttt{MATCH}. \\
+\addlinespace
+Variable-length relationships in \texttt{CREATE}/\texttt{MERGE}
+& Not yet & Explicit runtime errors for these shapes. \\
+\addlinespace
+\texttt{MERGE ... ON CREATE SET ... ON MATCH SET ...}
+& Supported & Clause-local \texttt{SET} chains implemented. \\
+\addlinespace
+\texttt{CALL} procedures
+& Partial & Built-ins: \texttt{db.labels()},
+\texttt{db.\allowbreak relationshipTypes()}, and
+\texttt{db.\allowbreak propertyKeys()}; test procedures are also implemented
+for harnessing. \\
+\addlinespace
+Pattern/list comprehensions and scalar/aggregate expressions in engine
+& Supported (MVP) & Broad expression support, with runtime validation and explicit unsupported cases. \\
+\addlinespace
+Transactions, persistence, indexes, cost-based planning, storage engine
+& Not yet & Runtime is intentionally in-memory and single-process. \\
+\bottomrule
+\end{tabularx}
+\normalsize
+\end{table}
+
+\section{Execution Model}
+The engine is designed for deterministic local semantics, not distributed or
+persistent execution.
+
+\paragraph{Data model.}
+Nodes and relationships are identified by integer IDs and store label/type and
+property maps. Paths are ordered node/relationship sequences.
+
+\paragraph{Clause semantics.}
+The runtime supports read and write clause chains, including filtering,
+projection, ordering, aggregation, updates, deletion, and unions. \texttt{CALL}
+is restricted to an in-memory procedure set. \texttt{WHERE} uses strict boolean
+coercion with three-valued logic for \texttt{null} propagation.
+
+\paragraph{Expression evaluation.}
+The evaluator supports arithmetic, comparison chains, map/list literals,
+list/pattern comprehensions, selected temporal constructors, and common scalar
+and aggregate functions. Error conditions (invalid operators, wrong argument
+types, unsupported forms) raise explicit runtime errors instead of silent
+fallback behavior.
+
+\paragraph{Error boundary.}
+The parse phase and runtime phase are explicitly separated:
+parse errors stop execution; runtime errors return with parse success metadata.
+
+\section{Evaluation Plan}
+\subsection{Current Local Validation Assets}
+Repository validation already includes:
+\begin{itemize}
+  \item Parser, diagnostics, formatter, and engine unit tests,
+  \item TCK parse coverage script (\texttt{tool/tck\_parse\_coverage.dart}),
+  \item TCK execution smoke script (\texttt{tool/tck\_execute\_coverage.dart}),
+  \item Engine benchmark driver (\texttt{tool/benchmark\_engine.dart}),
+  \item Release check script chaining format/analyze/test/doc generation.
+\end{itemize}
+
+\subsection{Benchmark Method Available Locally}
+The benchmark driver reports average microseconds per operation and operations
+per second for parse and execute scenarios (simple parse, complex parse,
+filter/projection execution, relationship matching, aggregation, and
+\texttt{MERGE} update path). A standard local run is:
+\begin{verbatim}
+dart run tool/benchmark_engine.dart \
+  --iterations 300 --warmup 60 --nodes 2000
+\end{verbatim}
+The script is intentionally launcher-dependent and should be used for relative
+regression tracking on a fixed machine profile, not for cross-machine absolute
+claims.
+
+\subsection{Reproducibility Checklist}
+\begin{table}[t]
+\centering
+\caption{Reproducibility checklist for this report.}
+\label{tab:repro-checklist}
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.33\linewidth} >{\raggedright\arraybackslash}p{0.10\linewidth} >{\raggedright\arraybackslash}X@{}}
+\toprule
+Item & Status & How to verify \\
+\midrule
+SDK bounds and dependency lockfile tracked & Yes &
+\path{pubspec.yaml}, \path{pubspec.lock} \\
+\addlinespace
+Deterministic test entry points committed & Yes &
+Run \texttt{dart test} in \path{test/}. \\
+\addlinespace
+TCK parse coverage harness available & Yes &
+Run \texttt{dart run} on \path{tool/tck_parse_coverage.dart}. \\
+\addlinespace
+TCK execution smoke harness available & Yes &
+Run \texttt{dart run} on \path{tool/tck_execute_coverage.dart}. \\
+\addlinespace
+Engine microbenchmark harness available & Yes &
+Run \texttt{dart run} on \path{tool/benchmark_engine.dart}. \\
+\addlinespace
+Document build command documented & Yes &
+\path{docs/paper/README.md} \\
+\addlinespace
+Machine/OS/VM metadata capture automated & No &
+Record manually when reporting benchmark results \\
+\bottomrule
+\end{tabularx}
+\normalsize
+\end{table}
+
+\section{Discussion and Limitations}
+Current limitations are explicit and material:
+\begin{itemize}
+  \item The parser is clause-oriented, not a full grammar-derived parser with a
+  complete expression AST.
+  \item Some syntactic and semantic issues are detected at runtime instead of
+  parse time because clause bodies are string-based.
+  \item Neo4j extension detection in strict mode is pattern-based and can miss
+  edge forms outside the implemented detectors.
+  \item Execution scope is MVP by design: no transactions, no persistent
+  storage, no planner/index subsystem, and restricted procedure ecosystem.
+  \item Not all openCypher TCK scenarios are expected to pass; provided scripts
+  are coverage/smoke tools rather than a full conformance certificate.
+  \item The repository ships ANTLR generation tooling, but generated artifacts
+  are not the default active parser path at runtime in the current build.
+\end{itemize}
+
+These constraints are acceptable for editor tooling, validation workflows, and
+small in-memory experimentation, but they bound applicability for full
+database-engine use cases.
+
+\section{Conclusion}
+\texttt{cypher\_dart} currently delivers a cohesive Dart-native Cypher
+toolchain: clause-level parsing with source-aware diagnostics, stable
+formatting, and an in-memory execution runtime that supports substantial
+read/write query workflows. The implementation is intentionally pragmatic and
+transparent about unsupported scope. The near-term technical leverage is clear:
+retain deterministic tooling behavior while progressively expanding grammar
+depth, semantic analysis breadth, and conformance coverage against openCypher
+artifacts \cite{openCypherRepo,openCypherTCK}.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
