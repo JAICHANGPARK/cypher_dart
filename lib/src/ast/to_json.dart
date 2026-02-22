@@ -1,5 +1,9 @@
 import 'nodes.dart';
 
+/// Converts [node] into a JSON-serializable map.
+///
+/// The output contains node type metadata, source span offsets, and clause-
+/// specific payload fields.
 Map<String, Object?> cypherNodeToJson(CypherNode node) {
   switch (node) {
     case CypherDocument():
@@ -40,7 +44,22 @@ Map<String, Object?> cypherNodeToJson(CypherNode node) {
     case RemoveClause():
       return _clause(node, <String, Object?>{'items': node.items});
     case DeleteClause():
+      return _clause(
+        node,
+        <String, Object?>{
+          'items': node.items,
+          'detach': node.detach,
+        },
+      );
+    case UnwindClause():
       return _clause(node, <String, Object?>{'items': node.items});
+    case CallClause():
+      return _clause(node, <String, Object?>{'invocation': node.invocation});
+    case UnionClause():
+      return _clause(node, <String, Object?>{
+        'all': node.all,
+        'queryPart': node.queryPart,
+      });
   }
 }
 

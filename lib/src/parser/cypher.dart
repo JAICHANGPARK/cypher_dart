@@ -6,7 +6,13 @@ import 'options.dart';
 import 'parse_result.dart';
 import 'source_mapper.dart';
 
+/// Entry point for parsing Cypher queries.
 abstract final class Cypher {
+  /// Parses [query] into a [CypherParseResult].
+  ///
+  /// Parsing behavior is controlled by [options]. In fail-fast mode
+  /// (`recoverErrors: false`), [CypherParseResult.document] is `null` when
+  /// errors are present.
   static CypherParseResult parse(
     String query, {
     CypherParseOptions options = const CypherParseOptions(),
@@ -105,12 +111,22 @@ List<CypherDiagnostic> _detectExtensionDiagnostics(
     message: 'CALL { ... } IN TRANSACTIONS is disabled in strict mode.',
   );
 
-  addIfUnsupported(
-    pattern: RegExp(r'\[[^\]]+\|[^\]]+\]'),
-    feature: CypherFeature.neo4jPatternComprehension,
-    code: 'CYP203',
-    message: 'Pattern comprehension is disabled in strict mode.',
-  );
+  if (!options.isFeatureEnabled(CypherFeature.neo4jPatternComprehension)) {
+    final patternComprehensionSpan = _findPatternComprehensionSpan(query);
+    if (patternComprehensionSpan != null) {
+      diagnostics.add(
+        CypherDiagnostic(
+          code: 'CYP203',
+          message: 'Pattern comprehension is disabled in strict mode.',
+          severity: DiagnosticSeverity.error,
+          span: mapper.span(
+            patternComprehensionSpan.$1,
+            patternComprehensionSpan.$2,
+          ),
+        ),
+      );
+    }
+  }
 
   addIfUnsupported(
     pattern: RegExp(r'\bUSE\s+', caseSensitive: false),
@@ -120,4 +136,71 @@ List<CypherDiagnostic> _detectExtensionDiagnostics(
   );
 
   return diagnostics;
+}
+
+(int, int)? _findPatternComprehensionSpan(String query) {
+  final bracketStack = <int>[];
+
+  var inSingle = false;
+  var inDouble = false;
+  var inBacktick = false;
+
+  for (var i = 0; i < query.length; i++) {
+    final char = query[i];
+    final prev = i > 0 ? query[i - 1] : '';
+
+    if (!inDouble && !inBacktick && char == "'" && prev != '\\') {
+      inSingle = !inSingle;
+      continue;
+    }
+
+    if (!inSingle && !inBacktick && char == '"' && prev != '\\') {
+      inDouble = !inDouble;
+      continue;
+    }
+
+    if (!inSingle && !inDouble && char == '`') {
+      inBacktick = !inBacktick;
+      continue;
+    }
+
+    if (inSingle || inDouble || inBacktick) {
+      continue;
+    }
+
+    if (char == '[') {
+      bracketStack.add(i);
+      continue;
+    }
+
+    if (char == ']' && bracketStack.isNotEmpty) {
+      final start = bracketStack.removeLast();
+      final content = query.substring(start + 1, i);
+      if (_isLikelyPatternComprehension(content)) {
+        return (start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+bool _isLikelyPatternComprehension(String content) {
+  final barIndex = content.indexOf('|');
+  if (barIndex < 0) {
+    return false;
+  }
+
+  final left = content.substring(0, barIndex);
+  if (RegExp(r'\bIN\b', caseSensitive: false).hasMatch(left)) {
+    return false;
+  }
+
+  if (!left.contains('(')) {
+    return false;
+  }
+  if (!left.contains('-')) {
+    return false;
+  }
+  return true;
 }

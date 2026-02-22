@@ -35,7 +35,12 @@ final class LexParseOutput {
 const List<String> _keywords = <String>[
   'OPTIONAL MATCH',
   'ORDER BY',
+  'UNION ALL',
   'MATCH',
+  'UNWIND',
+  'CALL',
+  'UNION',
+  'DETACH DELETE',
   'WHERE',
   'WITH',
   'RETURN',
@@ -49,7 +54,7 @@ const List<String> _keywords = <String>[
 ];
 
 final RegExp _keywordPattern = RegExp(
-  r'\bOPTIONAL\s+MATCH\b|\bORDER\s+BY\b|\bMATCH\b|\bWHERE\b|\bWITH\b|\bRETURN\b|\bCREATE\b|\bMERGE\b|\bSET\b|\bREMOVE\b|\bDELETE\b|\bLIMIT\b|\bSKIP\b',
+  r'\bOPTIONAL\s+MATCH\b|\bORDER\s+BY\b|\bUNION\s+ALL\b|\bUNWIND\b|\bCALL\b|\bUNION\b|\bDETACH\s+DELETE\b|\bMATCH\b|\bWHERE\b|\bWITH\b|\bRETURN\b|\bCREATE\b|\bMERGE\b|\bSET\b|\bREMOVE\b|\bDELETE\b|\bLIMIT\b|\bSKIP\b',
   caseSensitive: false,
 );
 
@@ -173,11 +178,27 @@ List<LexedClause> _extractClauses(
   required int absoluteStart,
   required CypherErrorCollector errors,
 }) {
-  final quotedMask = _quotedMask(statement);
+  final topLevelMask = _topLevelMask(statement);
   final matches = <RegExpMatch>[];
 
   for (final match in _keywordPattern.allMatches(statement)) {
-    if (match.start < quotedMask.length && quotedMask[match.start]) {
+    if (match.start >= topLevelMask.length || !topLevelMask[match.start]) {
+      continue;
+    }
+
+    final keyword = _normalizeKeyword(match.group(0)!);
+    if (_isOnSetModifierKeyword(
+      statement: statement,
+      keywordStart: match.start,
+      keyword: keyword,
+    )) {
+      continue;
+    }
+    if (_isStringPredicateKeyword(
+      statement: statement,
+      keywordStart: match.start,
+      keyword: keyword,
+    )) {
       continue;
     }
 
@@ -219,7 +240,7 @@ List<LexedClause> _extractClauses(
     final clauseStart = absoluteStart + current.start;
     final clauseEnd = absoluteStart + bodyEnd;
 
-    if (body.isEmpty) {
+    if (body.isEmpty && !_allowsEmptyBody(keyword)) {
       errors.addSyntax(
         message: 'Clause "$keyword" is missing a body expression.',
         start: clauseStart,
@@ -240,37 +261,68 @@ List<LexedClause> _extractClauses(
   return clauses;
 }
 
-List<bool> _quotedMask(String source) {
+List<bool> _topLevelMask(String source) {
   final mask = List<bool>.filled(source.length, false);
 
   var inSingle = false;
   var inDouble = false;
   var inBacktick = false;
+  var parenDepth = 0;
+  var braceDepth = 0;
+  var bracketDepth = 0;
 
   for (var i = 0; i < source.length; i++) {
+    mask[i] = !inSingle &&
+        !inDouble &&
+        !inBacktick &&
+        parenDepth == 0 &&
+        braceDepth == 0 &&
+        bracketDepth == 0;
+
     final char = source[i];
     final prev = i > 0 ? source[i - 1] : '';
 
     if (!inDouble && !inBacktick && char == "'" && prev != '\\') {
       inSingle = !inSingle;
-      mask[i] = true;
       continue;
     }
 
     if (!inSingle && !inBacktick && char == '"' && prev != '\\') {
       inDouble = !inDouble;
-      mask[i] = true;
       continue;
     }
 
     if (!inSingle && !inDouble && char == '`') {
       inBacktick = !inBacktick;
-      mask[i] = true;
       continue;
     }
 
     if (inSingle || inDouble || inBacktick) {
-      mask[i] = true;
+      continue;
+    }
+
+    if (char == '(') {
+      parenDepth++;
+      continue;
+    }
+    if (char == ')' && parenDepth > 0) {
+      parenDepth--;
+      continue;
+    }
+    if (char == '{') {
+      braceDepth++;
+      continue;
+    }
+    if (char == '}' && braceDepth > 0) {
+      braceDepth--;
+      continue;
+    }
+    if (char == '[') {
+      bracketDepth++;
+      continue;
+    }
+    if (char == ']' && bracketDepth > 0) {
+      bracketDepth--;
     }
   }
 
@@ -279,4 +331,35 @@ List<bool> _quotedMask(String source) {
 
 String _normalizeKeyword(String raw) {
   return raw.toUpperCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
+bool _allowsEmptyBody(String keyword) {
+  return keyword == 'UNION' || keyword == 'UNION ALL';
+}
+
+bool _isOnSetModifierKeyword({
+  required String statement,
+  required int keywordStart,
+  required String keyword,
+}) {
+  if (keyword != 'CREATE' && keyword != 'MATCH') {
+    return false;
+  }
+
+  final prefix = statement.substring(0, keywordStart);
+  return RegExp(r'\bON\s+$', caseSensitive: false).hasMatch(prefix);
+}
+
+bool _isStringPredicateKeyword({
+  required String statement,
+  required int keywordStart,
+  required String keyword,
+}) {
+  if (keyword != 'WITH') {
+    return false;
+  }
+
+  final prefix = statement.substring(0, keywordStart);
+  return RegExp(r'\b(?:STARTS|ENDS)\s+$', caseSensitive: false)
+      .hasMatch(prefix);
 }

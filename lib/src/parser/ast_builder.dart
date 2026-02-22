@@ -27,7 +27,6 @@ final class AstBuilder {
       final clauses = <CypherClause>[];
       var sawReturn = false;
       String? previousKeyword;
-      final aliases = <String, int>{};
 
       for (final rawClause in statement.clauses) {
         final span = mapper.span(rawClause.start, rawClause.end);
@@ -39,6 +38,12 @@ final class AstBuilder {
           previousKeyword: previousKeyword,
           sawReturn: sawReturn,
         );
+
+        if (_isUnionKeyword(rawClause.keyword)) {
+          sawReturn = false;
+          previousKeyword = rawClause.keyword;
+          continue;
+        }
 
         if (rawClause.keyword == 'RETURN') {
           if (sawReturn) {
@@ -53,18 +58,7 @@ final class AstBuilder {
         }
 
         if (rawClause.keyword == 'WITH' || rawClause.keyword == 'RETURN') {
-          for (final alias in _extractAliases(rawClause.body)) {
-            if (aliases.containsKey(alias)) {
-              errors.addSemantic(
-                code: 'CYP301',
-                message: 'Duplicate alias "$alias" detected in statement.',
-                start: rawClause.start,
-                end: rawClause.end,
-              );
-            } else {
-              aliases[alias] = rawClause.start;
-            }
-          }
+          _validateProjectionAliases(rawClause);
         }
 
         previousKeyword = rawClause.keyword;
@@ -119,6 +113,16 @@ final class AstBuilder {
         return RemoveClause(span: span, items: clause.body);
       case 'DELETE':
         return DeleteClause(span: span, items: clause.body);
+      case 'DETACH DELETE':
+        return DeleteClause(span: span, items: clause.body, detach: true);
+      case 'UNWIND':
+        return UnwindClause(span: span, items: clause.body);
+      case 'CALL':
+        return CallClause(span: span, invocation: clause.body);
+      case 'UNION':
+        return UnionClause(span: span, queryPart: clause.body);
+      case 'UNION ALL':
+        return UnionClause(span: span, queryPart: clause.body, all: true);
       default:
         errors.addSemantic(
           code: 'CYP101',
@@ -140,10 +144,11 @@ final class AstBuilder {
     if (sawReturn &&
         keyword != 'ORDER BY' &&
         keyword != 'LIMIT' &&
-        keyword != 'SKIP') {
+        keyword != 'SKIP' &&
+        !_isUnionKeyword(keyword)) {
       errors.addSemantic(
         code: 'CYP300',
-        message: 'Only ORDER BY, SKIP, and LIMIT may follow RETURN.',
+        message: 'Only ORDER BY, SKIP, LIMIT, and UNION may follow RETURN.',
         start: rawClause.start,
         end: rawClause.end,
       );
@@ -176,6 +181,20 @@ final class AstBuilder {
 
     if ((keyword == 'LIMIT' || keyword == 'SKIP') &&
         previousKeyword != 'RETURN' &&
+        previousKeyword != 'WITH' &&
+        previousKeyword != 'ORDER BY' &&
+        previousKeyword != 'LIMIT' &&
+        previousKeyword != 'SKIP') {
+      errors.addSemantic(
+        code: 'CYP300',
+        message: '$keyword must follow RETURN/WITH/ORDER BY/SKIP/LIMIT.',
+        start: rawClause.start,
+        end: rawClause.end,
+      );
+    }
+
+    if (_isUnionKeyword(keyword) &&
+        previousKeyword != 'RETURN' &&
         previousKeyword != 'ORDER BY' &&
         previousKeyword != 'LIMIT' &&
         previousKeyword != 'SKIP') {
@@ -200,4 +219,22 @@ final class AstBuilder {
       }
     }
   }
+
+  void _validateProjectionAliases(LexedClause clause) {
+    final seenInClause = <String>{};
+    for (final alias in _extractAliases(clause.body)) {
+      if (!seenInClause.add(alias)) {
+        errors.addSemantic(
+          code: 'CYP301',
+          message: 'Duplicate alias "$alias" detected in ${clause.keyword}.',
+          start: clause.start,
+          end: clause.end,
+        );
+      }
+    }
+  }
+}
+
+bool _isUnionKeyword(String keyword) {
+  return keyword == 'UNION' || keyword == 'UNION ALL';
 }

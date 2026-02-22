@@ -17,7 +17,7 @@ It is designed for tools that need query validation, editor feedback, and normal
 
 - Clause-level OpenCypher parsing for common query flows.
 - Partial semantic validation (clause ordering, duplicate aliases, feature gating).
-- No query execution engine (this package does not run queries against a database).
+- Experimental in-memory execution engine for query flows plus writes (`MATCH`/`WHERE`/`WITH`/`RETURN`/`ORDER BY`/`SKIP`/`LIMIT`/`UNWIND`/`UNION`/`CREATE`/`MERGE`/`SET`/`REMOVE`/`DELETE`/`DETACH DELETE`/`CALL`).
 
 ## Install
 
@@ -144,6 +144,30 @@ if (result.document != null) {
 }
 ```
 
+### 7) Experimental in-memory execution
+
+```dart
+final graph = InMemoryGraphStore()
+  ..createNode(
+    labels: {'Person'},
+    properties: {'name': 'Alice', 'age': 34},
+  );
+
+final execution = CypherEngine.execute(
+  'MATCH (n:Person) WHERE n.age >= 30 RETURN n.name AS name',
+  graph: graph,
+);
+
+print(execution.records); // [{name: Alice}]
+```
+
+Engine notes:
+- Supports relationship pattern matching for single-hop patterns like `(a)-[r:TYPE]->(b)`.
+- Supports relationship type alternation like `[r:T1|:T2]` and path variables in `MATCH` like `p = (a)-[r]->(b)`.
+- Supports basic aggregation in `WITH`/`RETURN` (`count`, `sum`, `avg`, `min`, `max`).
+- `MERGE ... ON CREATE SET ... ON MATCH SET ...` is supported for clause-local `SET` chains.
+- `CALL` supports built-in in-memory procedures: `db.labels()`, `db.relationshipTypes()`, `db.propertyKeys()`.
+
 ## Parse options
 
 - `dialect`: `CypherDialect.openCypher9` (default) or `CypherDialect.neo4j5`
@@ -182,6 +206,9 @@ if (result.document != null) {
 - `SetClause`
 - `RemoveClause`
 - `DeleteClause`
+- `UnwindClause`
+- `CallClause`
+- `UnionClause` (`UNION`, `UNION ALL`)
 
 ## Diagnostic code ranges
 

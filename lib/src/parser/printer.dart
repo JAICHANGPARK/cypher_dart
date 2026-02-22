@@ -1,15 +1,15 @@
 import '../ast/nodes.dart';
 
+/// Formats parsed Cypher AST nodes into canonical query text.
 abstract final class CypherPrinter {
+  /// Formats [document] into normalized Cypher text.
+  ///
+  /// Statements are separated with `;` and clause keywords are emitted using a
+  /// canonical uppercase style.
   static String format(CypherDocument document) {
     final statements = <String>[];
 
-    for (final statement in document.statements) {
-      if (statement is! CypherQueryStatement) {
-        throw UnsupportedError(
-            'Unsupported statement type: ${statement.runtimeType}');
-      }
-
+    for (final statement in document.statements.cast<CypherQueryStatement>()) {
       final clauseLines = <String>[];
       for (final clause in statement.clauses) {
         clauseLines.add(_formatClause(clause));
@@ -47,11 +47,20 @@ abstract final class CypherPrinter {
       case RemoveClause():
         return 'REMOVE $body';
       case DeleteClause():
-        return 'DELETE $body';
+        return '${clause.detach ? 'DETACH DELETE' : 'DELETE'} $body';
+      case UnwindClause():
+        return 'UNWIND $body';
+      case CallClause():
+        return 'CALL $body';
+      case UnionClause():
+        if (body.isEmpty) {
+          return clause.all ? 'UNION ALL' : 'UNION';
+        }
+        return '${clause.all ? 'UNION ALL' : 'UNION'} $body';
     }
   }
 
   static String _normalizeWhitespace(String value) {
-    return value.replaceAll(RegExp(r'\\s+'), ' ').trim();
+    return value.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 }

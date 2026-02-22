@@ -17,7 +17,7 @@ Dart/Flutter 환경에서 쿼리 검증, 에디터 피드백, 정규화된 쿼�
 
 - 일반적인 쿼리 흐름에 대한 clause-level OpenCypher 파싱
 - 부분적 semantic 검증(절 순서, 중복 alias, 기능 게이트)
-- 쿼리 실행 엔진은 포함하지 않음(데이터베이스 실행 기능 없음)
+- 쿼리 흐름과 쓰기(`MATCH`/`WHERE`/`WITH`/`RETURN`/`ORDER BY`/`SKIP`/`LIMIT`/`UNWIND`/`UNION`/`CREATE`/`MERGE`/`SET`/`REMOVE`/`DELETE`/`DETACH DELETE`/`CALL`)를 지원하는 실험적 인메모리 실행 엔진 포함
 
 ## 설치
 
@@ -144,6 +144,30 @@ if (result.document != null) {
 }
 ```
 
+### 7) 실험적 인메모리 실행
+
+```dart
+final graph = InMemoryGraphStore()
+  ..createNode(
+    labels: {'Person'},
+    properties: {'name': 'Alice', 'age': 34},
+  );
+
+final execution = CypherEngine.execute(
+  'MATCH (n:Person) WHERE n.age >= 30 RETURN n.name AS name',
+  graph: graph,
+);
+
+print(execution.records); // [{name: Alice}]
+```
+
+엔진 메모:
+- `(a)-[r:TYPE]->(b)` 형태의 단일 hop 관계 패턴 매칭을 지원합니다.
+- `[r:T1|:T2]` 관계 타입 alternation과 `MATCH p = (a)-[r]->(b)` 경로 변수 바인딩을 지원합니다.
+- `WITH`/`RETURN`에서 기본 집계(`count`, `sum`, `avg`, `min`, `max`)를 지원합니다.
+- `MERGE ... ON CREATE SET ... ON MATCH SET ...`를 절 단위 `SET` 체인에서 지원합니다.
+- `CALL`은 인메모리 내장 프로시저 `db.labels()`, `db.relationshipTypes()`, `db.propertyKeys()`를 지원합니다.
+
 ## Parse 옵션
 
 - `dialect`: `CypherDialect.openCypher9`(기본) 또는 `CypherDialect.neo4j5`
@@ -182,6 +206,9 @@ if (result.document != null) {
 - `SetClause`
 - `RemoveClause`
 - `DeleteClause`
+- `UnwindClause`
+- `CallClause`
+- `UnionClause` (`UNION`, `UNION ALL`)
 
 ## 진단 코드 범위
 
